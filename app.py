@@ -43,31 +43,54 @@ with st.sidebar:
     aspect = {"Wide rectangle": 1.3, "Square": 1.0, "Deep rectangle": 0.75}[shape_label]
 
     st.markdown("#### Model backend")
-    backend_label = st.radio(
-        "Source", ["Anthropic (Claude)", "Custom endpoint (open-source model)"],
-        label_visibility="collapsed",
-    )
 
-    backend_kwargs = {}
-    backend = None
-    if backend_label == "Anthropic (Claude)":
-        backend = "anthropic"
-        default_key = st.secrets.get("ANTHROPIC_API_KEY", "") if hasattr(st, "secrets") else ""
-        api_key = st.text_input("Anthropic API key", value=default_key, type="password",
-                                 help="Set ANTHROPIC_API_KEY in .streamlit/secrets.toml to skip this.")
-        model = st.text_input("Model", value="claude-sonnet-5")
-        backend_kwargs = {"api_key": api_key, "model": model}
-    else:
-        backend = "custom"
-        st.caption(
-            "Any OpenAI-compatible `/v1/chat/completions` server — Ollama, vLLM, "
-            "LM Studio, TGI — running an open-source model like Llama 3, Mistral, "
-            "or Qwen."
+    def _secret(name: str) -> str:
+        return st.secrets.get(name, "") if hasattr(st, "secrets") else ""
+
+    # Preset providers: (label, backend, base_url, default_model, secrets_key_name)
+    PROVIDER_PRESETS = {
+        "Anthropic (Claude)": ("anthropic", None, "claude-sonnet-5", "ANTHROPIC_API_KEY"),
+        "Groq (Llama 3.3, free tier)": ("custom", "https://api.groq.com/openai/v1/chat/completions",
+                                         "llama-3.3-70b-versatile", "GROQ_API_KEY"),
+        "OpenRouter (many free models)": ("custom", "https://openrouter.ai/api/v1/chat/completions",
+                                           "meta-llama/llama-3.3-70b-instruct:free", "OPENROUTER_API_KEY"),
+        "Cerebras (fast, free tier)": ("custom", "https://api.cerebras.ai/v1/chat/completions",
+                                        "llama3.3-70b", "CEREBRAS_API_KEY"),
+        "Together AI": ("custom", "https://api.together.xyz/v1/chat/completions",
+                         "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free", "TOGETHER_API_KEY"),
+        "Ollama (local, no key)": ("custom", "http://localhost:11434/v1/chat/completions",
+                                    "llama3.1:8b", None),
+        "Other custom endpoint": ("custom", "", "", None),
+    }
+
+    provider_label = st.selectbox("Provider", list(PROVIDER_PRESETS.keys()), index=1)
+    backend, preset_url, preset_model, secret_name = PROVIDER_PRESETS[provider_label]
+    preset_key = _secret(secret_name) if secret_name else ""
+
+    if backend == "anthropic":
+        api_key = st.text_input(
+            "Anthropic API key", value=preset_key, type="password",
+            key=f"apikey_{provider_label}",
+            help="Set ANTHROPIC_API_KEY in .streamlit/secrets.toml to skip pasting this every time.",
         )
-        base_url = st.text_input("Endpoint URL", value="http://localhost:11434/v1/chat/completions")
-        model = st.text_input("Model name", value="llama3.1:8b")
-        opt_key = st.text_input("API key (optional)", value="", type="password")
-        backend_kwargs = {"base_url": base_url, "model": model, "api_key": opt_key or None}
+        model = st.text_input("Model", value=preset_model, key=f"model_{provider_label}")
+        backend_kwargs = {"api_key": api_key, "model": model}
+        if not api_key:
+            st.warning("No Anthropic key found — paste one above, or pick a different provider.")
+    else:
+        base_url = st.text_input("Endpoint URL", value=preset_url, key=f"url_{provider_label}")
+        model = st.text_input("Model name", value=preset_model, key=f"model_{provider_label}")
+        needs_key = provider_label != "Ollama (local, no key)"
+        api_key = st.text_input(
+            "API key" + ("" if needs_key else " (optional)"), value=preset_key, type="password",
+            key=f"apikey_{provider_label}",
+            help=(f"Set {secret_name} in .streamlit/secrets.toml to skip pasting this every time."
+                  if secret_name else "Ollama running locally doesn't need a key."),
+        )
+        backend_kwargs = {"base_url": base_url, "model": model, "api_key": api_key or None}
+        if needs_key and not api_key:
+            st.warning(f"No key found for {provider_label} — paste one above, "
+                       f"or add {secret_name} to .streamlit/secrets.toml.")
 
     generate_clicked = st.button("Generate floor plan", type="primary", use_container_width=True)
 
